@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html><head lang="en"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+
+    <title>LocoTrack</title>
+
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <meta property="og:image" content="img/cats.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://ku-cvlab.github.io/LocoTrack/">
+    <meta property="og:title" content="Local All-Pair Correspondence for Point Tracking">
+    <meta property="og:description" content="">
+
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/font-awesome.min.css">
+    <link rel="stylesheet" href="css/codemirror.min.css">
+    <link rel="stylesheet" href="css/app.css">
+
+    <script src="js/jquery.min.js"></script>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/codemirror.min.js"></script>
+    <script src="js/clipboard.min.js"></script>
+    <script src="js/video_comparison.js"></script>
+    <script src="js/app.js"></script>
+</head>
+
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-L4QKE1L396"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-L4QKE1L396');
+</script>
+
+<body>
+    <div class="container" id="header" style="text-align: center; margin: auto;">
+        <div class="row" id="title-row" style="max-width: 100%; margin: 0 auto; display: inline-block">
+            <h2 class="col-md-12 text-center" id="title">
+                Local All-Pair Correspondence for Point Tracking<br>
+                <small>
+                    ECCV 2024
+                </small>
+            </h2>
+        </div>
+        <div class="row" id="author-row" style="margin:0 auto;">
+            <div class="col-md-12 text-center" style="display: table; margin:0 auto">
+                <a style="text-decoration:none" href="https://seokju-cho.github.io/">
+                    Seokju&nbsp;Cho<sup>1</sup>
+                </a>
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="https://gabriel-huang.github.io">
+                    Jiahui&nbsp;Huang<sup>2</sup>
+                </a>
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="https://nam-jisu.github.io">
+                    Jisu&nbsp;Nam<sup>1</sup>
+                </a>
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="https://hg010303.github.io">
+                    Honggyu&nbsp;An<sup>1</sup>
+                </a><br>
+                <a style="text-decoration:none" href="https://phseo.github.io">
+                    Seungryong&nbsp;Kim<sup>1,&dagger;</sup>
+                </a>
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="https://cvlab.korea.ac.kr">
+                    Joon-Young&nbsp;Lee<sup>2,&dagger;</sup>
+                </a>
+                <table class="author-table" id="author-table">
+                    <tr>
+                        <td>
+                            <sup>1</sup>Korea University
+                        </td>
+                        <td>
+                            <sup>2</sup>Adobe Research
+                        </td>
+                    </tr>
+                </table>
+                <small>
+                    <sup>&dagger;</sup>Corresponding Authors
+                </small>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.getElementById('author-row').style.maxWidth = document.getElementById("title-row").clientWidth + 'px';
+    </script>
+    <div class="container" id="main">
+        <div class="row">
+                <div class="col-sm-6 col-sm-offset-3 text-center">
+                    <ul class="nav nav-pills nav-justified">
+                        <li>
+                            <a href="https://arxiv.org/abs/2303.11797">
+                            <img src="./img/paper_image.png" height="60px">
+                                <h4><strong>Paper</strong></h4>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="https://github.com/KU-CVLAB/LocoTrack" target="_blank">
+                            <image src="img/github.png" height="60px">
+                                <h4><strong>Code</strong></h4>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+        </div>
+
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2">
+                <div class="text-center">
+                    <img src="./img/teaser.png" width="80%">
+                </div>
+
+                <div class="text-justify">
+                    LocoTrack is an extremely efficient and powerful point tracking model, enabling near-dense point tracking in real-time.
+                </div>
+            </div>
+        </div>
+
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2">
+                <h3>
+                    Abstract
+                </h3>
+                <p class="text-justify">
+                    We introduce LocoTrack, a highly accurate and efficient model designed for the task of tracking any point (TAP) across video sequences. Previous approaches in this task often rely on local 2D correlation maps to establish correspondences from a point in the query image to a local region in the target image, which often struggle with homogeneous regions or repetitive features, leading to matching ambiguities. LocoTrack overcomes this challenge with a novel approach that utilizes all-pair correspondences across regions, i.e., local 4D correlation, to establish precise correspondences, with bidirectional correspondence and matching smoothness significantly enhancing robustness against ambiguities. We also incorporate a lightweight correlation encoder to enhance computational efficiency, and a compact Transformer architecture to integrate long-term temporal information. LocoTrack achieves unmatched accuracy on all TAP-Vid benchmarks and operates at a speed almost 6 times faster than the current state-of-the-art.
+                </p>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2">
+                <h3>
+                    Extreme Efficiency
+                </h3>
+                <div class="text-center">
+                    <img src="./img/efficiency.png" width="80%">
+                </div>
+                <div class="text-justify">
+                    <p><strong>Results with a varying number of refinement iterations on TAP-Vid-DAVIS.</strong> The number in the circle denotes the number of iterations. (up) In a 256×256 resolution, compared to TAPIR<sup><a href="#ref1">[1]</a></sup>, <em>ours</em> achieves better performance in a <em>single iteration</em> while being about <em>9× faster</em>. (below) In a 384×512 resolution, compared to CoTracker<sup><a href="#ref2">[2]</a></sup>, <em>ours</em> achieves comparable performance while being about <em>8× faster</em>.</p>
+                </div>
+                <br>
+            </div>
+        </div>
+
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2">
+                <h3>
+                    Citation
+                </h3>
+                <div class="form-group col-md-10 col-md-offset-1">
+                    <textarea id="bibtex" class="form-control" readonly>
+@misc{cho2023catseg,
+    title={CAT-Seg: Cost Aggregation for Open-Vocabulary Semantic Segmentation}, 
+    author={Seokju Cho and Heeseong Shin and Sunghwan Hong and Seungjun An and Seungjun Lee and Anurag Arnab and Paul Hongsuck Seo and Seungryong Kim},
+    year={2023},
+    eprint={2303.11797},
+    archivePrefix={arXiv},
+    primaryClass={cs.CV}
+}
+                    </textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2">
+                <h3>
+                    Acknowledgements
+                </h3>
+                <p class="text-justify">
+                <!-- We would like to thank Lior Yariv and Kai Zhang for helping us evaluate their methods, and Ricardo Martin-Brualla for helpful comments on our text. DV is supported by the National Science Foundation under Cooperative Agreement PHY-2019786 (an NSF AI Institute, <a href="http://iaifi.org">http://iaifi.org</a>) -->
+                    <!-- <br> -->
+                The website template was borrowed from <a href="http://mgharbi.com/">Michaël Gharbi</a>.
+                </p>
+            </div>
+        </div>
+    </div>
+
+
+</body></html>
