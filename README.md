@@ -11,7 +11,7 @@
 <a href='https://ku-cvlab.github.io/locotrack'><img src='https://img.shields.io/badge/Project_Page-LocoTrack-green' alt='Project Page'></a>
 
 <p float='center'><img src="assets/teaser.png" width="80%" /></p>
-LocoTrack is an extremely efficient and powerful point tracking model, enabling near-dense point tracking in real-time.
+<span style="color: green; font-size: 1.3em; font-weight: bold;">LocoTrack is an incredibly efficient model,</span> enabling near-dense point tracking in real-time. It is <span style="color: red; font-size: 1.3em; font-weight: bold;">6x faster</span> than the previous state-of-the-art models.
 </div>
 
 ## Preparing the Environment
