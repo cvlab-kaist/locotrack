@@ -7,7 +7,7 @@
 
 **ECCV 2024**
 
-<a href=""><img src='https://img.shields.io/badge/arXiv-LocoTrack-red' alt='Paper PDF'></a>
+<a href="https://arxiv.org/abs/2407.15420"><img src='https://img.shields.io/badge/arXiv-LocoTrack-red' alt='Paper PDF'></a>
 <a href='https://ku-cvlab.github.io/locotrack'><img src='https://img.shields.io/badge/Project_Page-LocoTrack-green' alt='Project Page'></a>
 
 <p float='center'><img src="assets/teaser.png" width="80%" /></p>
@@ -129,7 +129,15 @@ python ./experiment.py --config ./configs/locotrack_config.py \
 ## Citing this Work
 Please use the following bibtex to cite our work:
 ```
-
+@misc{cho2024localallpaircorrespondencepoint,
+      title={Local All-Pair Correspondence for Point Tracking}, 
+      author={Seokju Cho and Jiahui Huang and Jisu Nam and Honggyu An and Seungryong Kim and Joon-Young Lee},
+      year={2024},
+      eprint={2407.15420},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2407.15420}, 
+}
 ```
 
 ## Acknowledgement
