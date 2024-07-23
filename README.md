@@ -14,6 +14,10 @@
 <span style="color: green; font-size: 1.3em; font-weight: bold;">LocoTrack is an incredibly efficient model,</span> enabling near-dense point tracking in real-time. It is <span style="color: red; font-size: 1.3em; font-weight: bold;">6x faster</span> than the previous state-of-the-art models.
 </div>
 
+## News
+* **2024-07-22:** [LocoTrack](https://github.com/KU-CVLAB/locotrack/) is released.
+* Please stay tuned for **Pytorch** version training and evaluation code!
+
 ## Preparing the Environment
 ```bash
 git clone https://github.com/google-research/kubric.git
