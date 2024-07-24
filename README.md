@@ -115,10 +115,9 @@ Replace the placeholder paths with the actual paths to your datasets.
 
 ## Training
 ### Training Dataset Preparation
-Download the panning-MOVi-E dataset used for training (approximately 273GB) from Huggingface using the following script:
+Download the panning-MOVi-E dataset used for training (approximately 273GB) from Huggingface using the following script. Git LFS should be installed to download the dataset. To install Git LFS, please refer to this [link](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage?platform=linux). Additionally, downloading instructions for the Huggingface dataset are available at this [link](https://huggingface.co/docs/hub/en/datasets-downloading)
 ```bash
-git lfs install
-git clone git@hf.co:dataset/hamacojr/LocoTrack-panning-MOVi-E
+git clone git@hf.co:datasets/hamacojr/LocoTrack-panning-MOVi-E
 ```
 
 ### Training Script
