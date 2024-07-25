@@ -132,14 +132,11 @@ python ./experiment.py --config ./configs/locotrack_config.py \
 ## Citing this Work
 Please use the following bibtex to cite our work:
 ```
-@misc{cho2024localallpaircorrespondencepoint,
-      title={Local All-Pair Correspondence for Point Tracking}, 
-      author={Seokju Cho and Jiahui Huang and Jisu Nam and Honggyu An and Seungryong Kim and Joon-Young Lee},
-      year={2024},
-      eprint={2407.15420},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2407.15420}, 
+@article{cho2024local,
+  title={Local All-Pair Correspondence for Point Tracking},
+  author={Cho, Seokju and Huang, Jiahui and Nam, Jisu and An, Honggyu and Kim, Seungryong and Lee, Joon-Young},
+  journal={arXiv preprint arXiv:2407.15420},
+  year={2024}
 }
 ```
 
