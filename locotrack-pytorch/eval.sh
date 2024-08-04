@@ -1,0 +1,2 @@
+export PYTHONPATH=$(cd ../ && pwd):$(pwd):$PYTHONPATH
+CUDA_VISIBLE_DEVICES=0 python train_locotrack.py --mode eval_davis --config config/default.ini --save_path snapshots/test --ckpt_path snapshots/pretrained/final.ckpt
