@@ -699,7 +699,7 @@ class LocoTrack(nn.Module):
     pts_iters = []
     expd_iters = []
     new_causal_context = []
-    num_iters = self.num_pips_iter * (len(feature_grids.lowres) - 1)
+    num_iters = self.num_pips_iter
     for _ in range(num_iters + 1):
       occ_iters.append([])
       pts_iters.append([])
@@ -763,7 +763,7 @@ class LocoTrack(nn.Module):
 
       mixer_feats = None
       for i in range(num_iters):
-        feature_level = i // self.num_pips_iter + 1
+        feature_level = -1
         queries = [
             query_features.hires[feature_level][:, perm_chunk],
             query_features.lowres[feature_level][:, perm_chunk],
