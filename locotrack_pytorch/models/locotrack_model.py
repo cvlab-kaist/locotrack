@@ -98,25 +98,15 @@ class MultiHeadAttention(nn.Module):
         bias_backward = bias_backward + torch.tril(torch.full_like(bias_backward, -1e9), diagonal=-1)
         attn_bias = torch.cat([bias_forward, bias_backward], dim=0).to(query.device)
 
-        attn_logits = torch.einsum("...thd,...Thd->...htT", query_heads, key_heads)
-        attn_logits = attn_logits / np.sqrt(self.key_size) + attn_bias
-
-        if mask is not None:
-            if mask.ndim != attn_logits.ndim:
-                raise ValueError(f"Mask dimensionality {mask.ndim} must match logits dimensionality {attn_logits.ndim}.")
-            attn_logits = torch.where(mask, attn_logits, torch.tensor(-1e30))
-
-        attn_weights = F.softmax(attn_logits, dim=-1)  # [H, T', T]
-
-        attn = torch.einsum("...htT,...Thd->...thd", attn_weights, value_heads)
-        attn = attn.reshape(batch_size, sequence_length, -1)  # [T', H*V]
+        attn = F.scaled_dot_product_attention(query_heads, key_heads, value_heads, attn_mask=attn_bias, scale=1 / np.sqrt(self.key_size))
+        attn = attn.permute(0, 2, 1, 3).reshape(batch_size, sequence_length, -1)
 
         return self.final_proj(attn)  # [T', D']
 
     def _linear_projection(self, x, head_size, proj_layer):
         y = proj_layer(x)
-        *leading_dims, _ = x.shape
-        return y.reshape((*leading_dims, self.num_heads, head_size))
+        batch_size, sequence_length, _= x.shape
+        return y.reshape((batch_size, sequence_length, self.num_heads, head_size)).permute(0, 2, 1, 3)
 
 
 class Transformer(nn.Module):
@@ -715,30 +705,14 @@ class LocoTrack(nn.Module):
     )
 
     num_queries = query_features.lowres[0].shape[1]
-    if causal_context is None:
-      perm = torch.randperm(num_queries)
-    else:
-      perm = torch.arange(num_queries)
-
-    inv_perm = torch.zeros_like(perm)
-    inv_perm[perm] = torch.arange(num_queries)
 
     for ch in range(0, num_queries, query_chunk_size):
-      perm_chunk = perm[ch : ch + query_chunk_size]
-      chunk = query_features.lowres[0][:, perm_chunk]
-      chunk_hires = query_features.hires[0][:, perm_chunk]
-
-      cc_chunk = []
-      if causal_context is not None:
-        for d in range(len(causal_context)):
-          tmp_dict = {}
-          for k, v in causal_context[d].items():
-            tmp_dict[k] = v[:, perm_chunk]
-          cc_chunk.append(tmp_dict)
+      chunk = query_features.lowres[0][:, ch:ch + query_chunk_size]
+      chunk_hires = query_features.hires[0][:, ch:ch + query_chunk_size]
 
       if query_points_in_video is not None:
         infer_query_points = query_points_in_video[
-            :, perm[ch : ch + query_chunk_size]
+            :, ch : ch + query_chunk_size
         ]
         num_frames = feature_grids.lowres[0].shape[1]
         infer_query_points = utils.convert_grid_coordinates(
@@ -765,14 +739,14 @@ class LocoTrack(nn.Module):
       for i in range(num_iters):
         feature_level = -1
         queries = [
-            query_features.hires[feature_level][:, perm_chunk],
-            query_features.lowres[feature_level][:, perm_chunk],
-            query_features.highest[feature_level][:, perm_chunk],
+            query_features.hires[feature_level][:, ch:ch + query_chunk_size],
+            query_features.lowres[feature_level][:, ch:ch + query_chunk_size],
+            query_features.highest[feature_level][:, ch:ch + query_chunk_size],
         ]
         supports = [
-            query_features.hires_supp[feature_level][:, perm_chunk],
-            query_features.lowres_supp[feature_level][:, perm_chunk],
-            query_features.highest_supp[feature_level][:, perm_chunk],
+            query_features.hires_supp[feature_level][:, ch:ch + query_chunk_size],
+            query_features.lowres_supp[feature_level][:, ch:ch + query_chunk_size],
+            query_features.highest_supp[feature_level][:, ch:ch + query_chunk_size],
         ]
         for _ in range(self.pyramid_level):
           queries.append(queries[-1])
@@ -790,7 +764,7 @@ class LocoTrack(nn.Module):
                   padding=0,
               )
           )
-        cc = cc_chunk[i] if causal_context is not None else None
+
         refined = self.refine_pips(
             queries,
             supports,
@@ -803,7 +777,6 @@ class LocoTrack(nn.Module):
             last_iter=mixer_feats,
             mixer_iter=i,
             resize_hw=feature_grids.resolutions[feature_level],
-            causal_context=cc,
             get_causal_context=get_causal_context,
             cost_volume=cost_volume
         )
@@ -822,9 +795,9 @@ class LocoTrack(nn.Module):
     points = []
     expd = []
     for i, _ in enumerate(occ_iters):
-      occlusion.append(torch.cat(occ_iters[i], dim=1)[:, inv_perm])
-      points.append(torch.cat(pts_iters[i], dim=1)[:, inv_perm])
-      expd.append(torch.cat(expd_iters[i], dim=1)[:, inv_perm])
+      occlusion.append(torch.cat(occ_iters[i], dim=1))
+      points.append(torch.cat(pts_iters[i], dim=1))
+      expd.append(torch.cat(expd_iters[i], dim=1))
 
     out = dict(
         occlusion=occlusion,
