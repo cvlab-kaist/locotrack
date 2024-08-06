@@ -18,11 +18,12 @@
 ## 📰 News
 * **2024-07-22:** [LocoTrack](https://github.com/KU-CVLAB/locotrack/) is released.
 * **2024-08-03:** PyTorch inference and training code released.
-* **2024-08-05:** Interactive demo released.
+* **2024-08-05:** [Interactive demo](https://huggingface.co/spaces/hamacojr/LocoTrack) released.
 
 **Please stay tuned for an easy-to-use API for LocoTrack, coming soon!**
 
 ## 🎮 Interactive Demo
+Try our interactive demo on [Huggingface](https://huggingface.co/spaces/hamacojr/LocoTrack). To run the demo locally, please follow these steps:
 1. **Install Dependencies**: Ensure you have all the necessary packages by running:
     ```bash
     pip install -r demo/requirements.txt
