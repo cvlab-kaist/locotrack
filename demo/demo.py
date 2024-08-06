@@ -274,7 +274,7 @@ with gr.Blocks() as demo:
     gr.Markdown("# LocoTrack Demo")
     gr.Markdown("This is an interactive demo for LocoTrack. For more details, please refer to the [GitHub repository](https://github.com/KU-CVLAB/LocoTrack) or the [paper](https://arxiv.org/abs/2407.15420).")
 
-    gr.Markdown("## First step: Choose the model size and upload your video")
+    gr.Markdown("## First step: Choose the model size, upload your video or select an example video, and click submit.")
     with gr.Row():
         with gr.Accordion("Your video input", open=True) as video_in_drawer:
             model_size_selection = gr.Radio(
@@ -283,8 +283,9 @@ with gr.Blocks() as demo:
                 value="small",
             )
             video_in = gr.Video(label="Video Input", format="mp4")
+            submit = gr.Button("Submit", scale=0)
     
-    gr.Markdown("## Second step: Add query points to track")
+    gr.Markdown("## Second step: Add query points to the video, and click track.")
     with gr.Row():
 
         with gr.Column():
@@ -314,7 +315,7 @@ with gr.Blocks() as demo:
                 loop=True,
             )
     
-    video_in.upload(
+    submit.click(
         fn = preprocess_video_input, 
         inputs = [video_in, model_size_selection], 
         outputs = [
