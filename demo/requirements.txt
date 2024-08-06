@@ -1,4 +1,4 @@
-einshape==1.0
+einops==0.8.0
 gradio==4.40.0
 mediapy==1.2.2
 opencv-python==4.10.0.84
