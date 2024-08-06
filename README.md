@@ -9,6 +9,7 @@
 
 <a href="https://arxiv.org/abs/2407.15420"><img src='https://img.shields.io/badge/arXiv-LocoTrack-red' alt='Paper PDF'></a>
 <a href='https://ku-cvlab.github.io/locotrack'><img src='https://img.shields.io/badge/Project_Page-LocoTrack-green' alt='Project Page'></a>
+<a href='https://huggingface.co/spaces/hamacojr/LocoTrack'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue'></a>
 
 <p float='center'><img src="assets/teaser.png" width="80%" /></p>
 <span style="color: green; font-size: 1.3em; font-weight: bold;">LocoTrack is an incredibly efficient model,</span> enabling near-dense point tracking in real-time. It is <span style="color: red; font-size: 1.3em; font-weight: bold;">6x faster</span> than the previous state-of-the-art models.
