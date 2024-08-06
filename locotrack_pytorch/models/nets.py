@@ -21,6 +21,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from models.utils import Conv2dSamePadding
+
 
 class ExtraConvBlock(nn.Module):
   """Additional convolution block."""
@@ -268,7 +270,7 @@ class BlockV2(nn.Module):
 
     self.use_projection = use_projection
     if self.use_projection:
-      self.proj_conv = nn.Conv2d(
+      self.proj_conv = Conv2dSamePadding(
           in_channels=channels_in,
           out_channels=channels_out,
           kernel_size=1,
@@ -284,7 +286,7 @@ class BlockV2(nn.Module):
         affine=True,
         track_running_stats=False,
     )
-    self.conv_0 = nn.Conv2d(
+    self.conv_0 = Conv2dSamePadding(
         in_channels=channels_in,
         out_channels=channels_out,
         kernel_size=3,
@@ -293,7 +295,7 @@ class BlockV2(nn.Module):
         bias=False,
     )
 
-    self.conv_1 = nn.Conv2d(
+    self.conv_1 = Conv2dSamePadding(
         in_channels=channels_out,
         out_channels=channels_out,
         kernel_size=3,
@@ -317,7 +319,7 @@ class BlockV2(nn.Module):
     if self.use_projection:
       shortcut = self.proj_conv(x)
 
-    x = self.conv_0(F.pad(x, self.padding))
+    x = self.conv_0(x)
 
     x = self.bn_1(x)
     x = torch.relu(x)
@@ -392,7 +394,7 @@ class ResNet(nn.Module):
     """
     super().__init__()
 
-    self.initial_conv = nn.Conv2d(
+    self.initial_conv = Conv2dSamePadding(
         in_channels=3,
         out_channels=channels_per_group[0],
         kernel_size=(7, 7),
@@ -417,7 +419,7 @@ class ResNet(nn.Module):
   def forward(self, inputs):
     result = {}
     out = inputs
-    out = self.initial_conv(F.pad(out, (2, 4, 2, 4)))
+    out = self.initial_conv(out)
     result['initial_conv'] = out
 
     for block_id, block_group in enumerate(self.block_groups):

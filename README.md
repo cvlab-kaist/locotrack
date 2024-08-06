@@ -16,18 +16,27 @@
 
 ## 📰 News
 * **2024-07-22:** [LocoTrack](https://github.com/KU-CVLAB/locotrack/) is released.
-* **2024-08-03:** **PyTorch inference and training code released.**
+* **2024-08-03:** PyTorch inference and training code released.
+* **2024-08-05:** Interactive demo released.
 
-## 🚀 Demo Code Coming Soon!
+**Please stay tuned for an easy-to-use API for LocoTrack, coming soon!**
 
-Stay tuned for the release of the demo code. We are working hard to provide you with an interactive demonstration of LocoTrack's capabilities.
+## 🎮 Interactive Demo
+1. **Install Dependencies**: Ensure you have all the necessary packages by running:
+    ```bash
+    pip install -r demo/requirements.txt
+    ```
 
+2. **Run the Demo**: Launch the interactive Gradio demo with:
+    ```bash
+    python demo/demo.py
+    ```
 
 ## Training and Evaluation
 For detailed instructions on training and evaluation, please refer to the README file for your chosen implementation:
 
 - **[JAX Implementation](./locotrack/README.md)**
-- **[PyTorch Implementation](./locotrack-pytorch/README.md)**
+- **[PyTorch Implementation](./locotrack_pytorch/README.md)**
 
 ## Evaluation Dataset Preparation
 First, download the evaluation datasets:

@@ -332,6 +332,7 @@ class LocoTrack(nn.Module):
       self,
       video: torch.Tensor,
       query_points: torch.Tensor,
+      feature_grids: Optional[FeatureGrids] = None,
       is_training: bool = False,
       query_chunk_size: Optional[int] = 64,
       get_query_feats: bool = False,
@@ -367,11 +368,12 @@ class LocoTrack(nn.Module):
     if get_query_feats:
       raise ValueError('Get query feats not supported in TAPIR.')
 
-    feature_grids = self.get_feature_grids(
-        video,
-        is_training,
-        refinement_resolutions,
-    )
+    if feature_grids is None:
+      feature_grids = self.get_feature_grids(
+          video,
+          is_training,
+          refinement_resolutions,
+      )
 
     query_features = self.get_query_features(
         video,
@@ -532,7 +534,7 @@ class LocoTrack(nn.Module):
   def get_feature_grids(
       self,
       video: torch.Tensor,
-      is_training: bool,
+      is_training: Optional[bool] = False,
       refinement_resolutions: Optional[List[Tuple[int, int]]] = None,
   ) -> FeatureGrids:
     """Computes feature grids.
@@ -1029,3 +1031,23 @@ class LocoTrack(nn.Module):
         k: torch.zeros(v, dtype=torch.float32) for k, v in value_shapes.items()
     }
     return [fake_ret] * num_resolutions * 4
+
+
+CHECKPOINT_LINK = {
+    'small': 'https://huggingface.co/datasets/hamacojr/LocoTrack-pytorch-weights/resolve/main/locotrack_small.ckpt',
+    'base': 'https://huggingface.co/datasets/hamacojr/LocoTrack-pytorch-weights/resolve/main/locotrack_base.ckpt',
+}
+
+def load_model(ckpt_path=None, model_size='base'):
+  if ckpt_path is None:
+    ckpt_link = CHECKPOINT_LINK[model_size]
+    state_dict = torch.hub.load_state_dict_from_url(ckpt_link, map_location='cpu')['state_dict']
+  else:
+    state_dict = torch.load(ckpt_path)['state_dict']
+  state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
+
+  model = LocoTrack(model_size=model_size)
+  model.load_state_dict(state_dict)
+  model.eval()
+
+  return model

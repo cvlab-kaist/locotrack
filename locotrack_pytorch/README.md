@@ -20,7 +20,7 @@ To evaluate LocoTrack on the benchmarks, first download the pre-trained weights.
 | Model       | Pre-trained Weights |
 |-------------|---------------------|
 | LocoTrack-S | [Link](https://huggingface.co/datasets/hamacojr/LocoTrack-pytorch-weights/resolve/main/locotrack_small.ckpt) |
-| LocoTrack-L | [Link](https://huggingface.co/datasets/hamacojr/LocoTrack-pytorch-weights/resolve/main/locotrack_base.ckpt)  |
+| LocoTrack-B | [Link](https://huggingface.co/datasets/hamacojr/LocoTrack-pytorch-weights/resolve/main/locotrack_base.ckpt)  |
 
 ### 2. Adjust the Config File
 
@@ -28,10 +28,10 @@ In `config/default.ini` (or any other config file), add the path to the evaluati
 
 ### 3. Run Evaluation
 
-To evaluate the LocoTrack model, use the `experiments.py` script with the following command-line arguments:
+To evaluate the LocoTrack model, use the `experiment.py` script with the following command-line arguments:
 
 ```bash
-python experiments.py --config config/default.ini --mode eval_{dataset_to_eval_1}_..._{dataset_to_eval_N}[_q_first] --ckpt_path /path/to/checkpoint --save_path ./path_to_save_checkpoints/
+python experiment.py --config config/default.ini --mode eval_{dataset_to_eval_1}_..._{dataset_to_eval_N}[_q_first] --ckpt_path /path/to/checkpoint --save_path ./path_to_save_checkpoints/
 ```
 
 - `--config`: Specifies the path to the configuration file. Default is `config/default.ini`.
@@ -58,5 +58,5 @@ git clone git@hf.co:datasets/hamacojr/LocoTrack-panning-MOVi-E
 Add the path to the downloaded panning-MOVi-E to the `[TRAINING]-kubric_dir` entry in `config/default.ini` (or any other config file). Optionally, for efficient training, change `[TRAINING]-precision` in the config file to `bf16-mixed` to use `bfloat16`. Then, run the training with the following script:
 
 ```bash
-python experiments.py --config config/default.ini --mode train_davis --save_path ./path_to_save_checkpoints/
+python experiment.py --config config/default.ini --mode train_davis --save_path ./path_to_save_checkpoints/
 ```
