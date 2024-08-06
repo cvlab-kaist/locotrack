@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
+
 from models import utils
 
 
@@ -29,8 +31,8 @@ class CMDTop(nn.Module):
         """
         x: (b, h, w, i, j)
         """
-        out1 = utils.einshape('bhwij->b(ij)hw', x)
-        out2 = utils.einshape('bhwij->b(hw)ij', x)
+        out1 = rearrange(x, 'b h w i j -> b (i j) h w')
+        out2 = rearrange(x, 'b h w i j -> b (h w) i j')
         
         for i in range(len(self.out_channels)):
             out1 = self.conv[i](out1)
