@@ -191,6 +191,7 @@ def train(
         )
         train_dataloader = KubricData(
             global_rank=trainer.global_rank, 
+            world_size=trainer.world_size,
             data_dir=kubric_dir, 
             batch_size=batch_size * trainer.world_size,
         )

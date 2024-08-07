@@ -170,10 +170,12 @@ class KubricData:
     def __init__(
             self, 
             global_rank,
+            world_size,
             data_dir,
             **kwargs
         ):
         self.global_rank = global_rank
+        self.world_size = world_size
 
         if self.global_rank == 0:
             self.data = create_point_tracking_dataset(
@@ -186,18 +188,17 @@ class KubricData:
             batch_all = next(self.data)
             batch_list = []
 
-            world_size = torch.distributed.get_world_size()
-            batch_size = batch_all['video'].shape[0] // world_size
+            batch_size = batch_all['video'].shape[0] // self.world_size
 
 
-            for i in range(world_size):
+            for i in range(self.world_size):
                 batch = {}
                 for k, v in batch_all.items():
                     if isinstance(v, (np.ndarray, torch.Tensor)):
                         batch[k] = torch.tensor(v[i * batch_size: (i + 1) * batch_size])
                 batch_list.append(batch)
         else:
-            batch_list = [None] * torch.distributed.get_world_size()
+            batch_list = [None] * self.world_size
 
         
         batch = [None]
