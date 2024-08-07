@@ -8,7 +8,7 @@ git clone https://github.com/google-research/kubric.git
 conda create -n locotrack-pytorch python=3.11
 conda activate locotrack-pytorch
 
-pip install torch torchvision torchaudio lightning==2.3.3 tensorflow_datasets tensorflow matplotlib mediapy tensorflow_graphics einshape wandb
+pip install torch torchvision torchaudio lightning==2.3.3 tensorflow_datasets tensorflow matplotlib mediapy tensorflow_graphics einops wandb
 ```
 
 ## LocoTrack Evaluation
