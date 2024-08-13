@@ -60,44 +60,42 @@ class LocoTrackModel(L.LightningModule):
         loss, loss_scalars = self.loss(batch, output)
         metrics = model_utils.eval_batch(batch, output, query_first=self.query_first)
         
-        if self.trainer.global_rank == 0:
-            log_prefix = 'val/'
-            if dataloader_idx is not None:
-                log_prefix = f'val/data_{dataloader_idx}/'
+        log_prefix = 'val/'
+        if dataloader_idx is not None:
+            log_prefix = f'val/data_{dataloader_idx}/'
 
-            self.log_dict(
-                {log_prefix + k: v for k, v in loss_scalars.items()},
-                logger=True,
-                rank_zero_only=True,
-            )
-            self.log_dict(
-                {log_prefix + k: v.item() for k, v in metrics.items()},
-                logger=True,
-                rank_zero_only=True,
-            )
-            logging.info(f"Batch {batch_idx}: {metrics}")
+        self.log_dict(
+            {log_prefix + k: v for k, v in loss_scalars.items()},
+            logger=True,
+            sync_dist=True,
+        )
+        self.log_dict(
+            {log_prefix + k: v.item() for k, v in metrics.items()},
+            logger=True,
+            sync_dist=True,
+        )
+        logging.info(f"Batch {batch_idx}: {metrics}")
 
     def test_step(self, batch, batch_idx, dataloader_idx=None):
         output = self.model(batch['video'], batch['query_points'], **self.model_forward_kwargs)
         loss, loss_scalars = self.loss(batch, output)
         metrics = model_utils.eval_batch(batch, output, query_first=self.query_first)
 
-        if self.trainer.global_rank == 0:
-            log_prefix = 'test/'
-            if dataloader_idx is not None:
-                log_prefix = f'test/data_{dataloader_idx}/'
-            
-            self.log_dict(
-                {log_prefix + k: v for k, v in loss_scalars.items()},
-                logger=True,
-                rank_zero_only=True,
-            )
-            self.log_dict(
-                {log_prefix + k: v.item() for k, v in metrics.items()},
-                logger=True,
-                rank_zero_only=True,
-            )
-            logging.info(f"Batch {batch_idx}: {metrics}")
+        log_prefix = 'test/'
+        if dataloader_idx is not None:
+            log_prefix = f'test/data_{dataloader_idx}/'
+        
+        self.log_dict(
+            {log_prefix + k: v for k, v in loss_scalars.items()},
+            logger=True,
+            sync_dist=True,
+        )
+        self.log_dict(
+            {log_prefix + k: v.item() for k, v in metrics.items()},
+            logger=True,
+            sync_dist=True,
+        )
+        logging.info(f"Batch {batch_idx}: {metrics}")
         
     def configure_optimizers(self):
         weights = [p for n, p in self.named_parameters() if 'bias' not in n]
