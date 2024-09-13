@@ -15,13 +15,13 @@
 
 """Pytorch model utilities."""
 import math
-from typing import Any, Sequence, Union
+from typing import Any, Sequence, Union, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 
-def bilinear(x: torch.Tensor, resolution: tuple[int, int]) -> torch.Tensor:
+def bilinear(x: torch.Tensor, resolution: Tuple[int, int]) -> torch.Tensor:
   """Resizes a 5D tensor using bilinear interpolation.
 
   Args:

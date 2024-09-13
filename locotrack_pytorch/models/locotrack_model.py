@@ -16,7 +16,7 @@
 """TAPIR models definition."""
 
 import functools
-from typing import Any, List, Mapping, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Union, Dict
 
 import torch
 from torch import nn
@@ -646,7 +646,7 @@ class LocoTrack(nn.Module):
       query_features: QueryFeatures,
       query_points_in_video: Optional[torch.Tensor],
       query_chunk_size: Optional[int] = None,
-      causal_context: Optional[dict[str, torch.Tensor]] = None,
+      causal_context: Optional[Dict[str, torch.Tensor]] = None,
       get_causal_context: bool = False,
   ) -> Mapping[str, Any]:
     """Estimates trajectories given features for a video and query features.
@@ -996,7 +996,66 @@ class LocoTrack(nn.Module):
         k: torch.zeros(v, dtype=torch.float32) for k, v in value_shapes.items()
     }
     return [fake_ret] * num_resolutions * 4
+  
+  def inference(
+      self, 
+      video : Union[np.ndarray, torch.Tensor],
+      query_points : torch.Tensor, 
+      query_chunk_size : int = 64,
+      resolution : Tuple[int, int] = (256, 256),
+      query_format : str = 'tyx',
+    ) -> dict:
+    """
+    Run inference on LocoTrack model.
+    Args:
+      model: LocoTrack model
+      video: np.ndarray or torch.Tensor, shape [batch, time, height, width, 3], normalized to [-1, 1]
+        if np.ndarray, it will be converted to torch.Tensor
+        if dtype is uint8, it will be converted to float32 and normalized to [-1, 1]
+      query_points: torch.Tensor, shape [batch, num_points, 3]
+      query_chunk_size: int, default 64
+      resolution: Tuple[int, int], default (256, 256)
+      query_format: str, default 'tyx', query points format
+    Returns:
+      dict with keys: 'tracks', 'occlusion'
+    """
+    assert video.shape[-1] == 3, f'video shape should be [batch, time, height, width, 3], got {video.shape}'
+    device = next(self.parameters()).device
 
+    # query_format is not tyx, then convert query_points to tyx
+    query_shuffle_ind = [query_format.index(c) for c in 'tyx']
+    query_points = query_points[..., query_shuffle_ind].to(device)
+    
+    if isinstance(video, np.ndarray):
+      video = torch.from_numpy(video).to(device)
+    
+    if video.dtype == torch.uint8:
+      video = video.float() / 255.0 * 2 - 1
+
+    B, _, H, W, _ = video.shape
+    if (H, W) != resolution:
+      video = rearrange(video, 'b t h w c -> (b t) c h w')
+      video = F.interpolate(video, resolution, mode='bilinear', align_corners=False)  
+      video = rearrange(video, '(b t) c h w -> b t h w c', b=B)
+
+      query_points = query_points.clone()
+      query_points[..., 1] = query_points[..., 1] / H * resolution[0]
+      query_points[..., 2] = query_points[..., 2] / W * resolution[1]
+
+    out = self.forward(video, query_points, query_chunk_size=query_chunk_size)
+    tracks, occlusion, expected_dist = out['tracks'], out['occlusion'], out['expected_dist']
+
+    tracks = tracks * torch.tensor([W / resolution[1], H / resolution[0]], device=tracks.device)
+    
+    pred_occ = torch.sigmoid(occlusion)
+    pred_occ = 1 - (1 - pred_occ) * (1 - torch.sigmoid(expected_dist))
+    pred_occ = pred_occ > 0.5  # threshold
+
+    return {
+      'tracks': tracks,
+      'occlusion': pred_occ,
+    }
+    
 
 CHECKPOINT_LINK = {
     'small': 'https://huggingface.co/datasets/hamacojr/LocoTrack-pytorch-weights/resolve/main/locotrack_small.ckpt',
