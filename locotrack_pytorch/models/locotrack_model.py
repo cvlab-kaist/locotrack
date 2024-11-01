@@ -23,6 +23,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 from einops import rearrange
+from einops.layers.torch import Rearrange
 
 from models import nets, utils
 from models.cmdtop import CMDTop
@@ -220,6 +221,27 @@ class QueryFeatures(NamedTuple):
   resolutions: Sequence[Tuple[int, int]]
 
 
+def build_dino_adapter(input_channels, intermed_channels, num_layers):
+  adapter = nn.ModuleList([
+    nn.Sequential(
+      Rearrange('b c t h w -> b t h w c'),
+      nn.Linear(input_channels, intermed_channels),
+      Rearrange('b t h w c -> b c t h w'),
+      nn.ReLU(),
+      nn.Conv3d(intermed_channels, intermed_channels, kernel_size=(3, 3, 3), padding=(1, 1, 1)),
+      nn.ReLU(),
+      Rearrange('b c t h w -> b t h w c'),
+      nn.Linear(intermed_channels, input_channels),
+      Rearrange('b t h w c -> b c t h w'),
+    )
+    for _ in range(num_layers)
+  ])
+  for layer in adapter:
+    torch.nn.init.zeros_(layer[-2].weight)
+    torch.nn.init.zeros_(layer[-2].bias)
+  return adapter
+
+
 class LocoTrack(nn.Module):
   """TAPIR model."""
 
@@ -240,6 +262,10 @@ class LocoTrack(nn.Module):
       extra_convs: bool = False,
       use_casual_conv: bool = False,
       model_size: str = 'base',
+      dino_size: str = 'small',
+      enable_refiner: bool = False,
+      support_size: int = 3,
+      window_size: int = 7,
   ):
     super().__init__()
 
@@ -285,6 +311,8 @@ class LocoTrack(nn.Module):
     self.feature_extractor_chunk_size = feature_extractor_chunk_size
     self.num_mixer_blocks = num_mixer_blocks
     self.use_casual_conv = use_casual_conv
+    self.support_size = support_size
+    self.window_size = window_size
 
     highres_dim = 128
     lowres_dim = 256
@@ -293,32 +321,45 @@ class LocoTrack(nn.Module):
     channels_per_group = (64, highres_dim, 256, lowres_dim)
     use_projection = (True, True, True, True)
 
-    self.resnet_torch = nets.ResNet(
-        blocks_per_group=blocks_per_group,
-        channels_per_group=channels_per_group,
-        use_projection=use_projection,
-        strides=strides,
-    )
+    backbone_archs = {
+        "small": "vits14",
+        "base": "vitb14",
+        "large": "vitl14",
+        "giant": "vitg14",
+    }
+    input_channels = {
+        "small": 384,
+        "base": 768,
+        "large": 1536,
+    }
 
-    self.torch_pips_mixer = PIPSTransformer(
-      input_channels=854,
-      output_channels=4 + self.highres_dim + self.lowres_dim,
-      **model_params
+    backbone_arch = backbone_archs[dino_size]
+    backbone_name = f"dinov2_{backbone_arch}"
+
+    self.dino = torch.hub.load(repo_or_dir="facebookresearch/dinov2", model=backbone_name)
+    self.dino_adapter = build_dino_adapter(
+      input_channels=input_channels[dino_size], 
+      intermed_channels=256,
+      num_layers=1,
     )
+    self.img_mult = 64
+
+    if enable_refiner:
+      self.torch_pips_mixer = PIPSTransformer(
+        input_channels=854,
+        output_channels=4 + self.highres_dim + self.lowres_dim,
+        **model_params
+      )
     
-    self.cmdtop = nn.ModuleList([
-      CMDTop(
-        **cmdtop_params
-      ) for _ in range(3)
-    ])
-
-    self.cost_conv = utils.Conv2dSamePadding(2, 1, 3, 1)
-    self.occ_linear = nn.Linear(6, 2)
-
-    if extra_convs:
-      self.extra_convs = nets.ExtraConvs()
+      self.cmdtop = nn.ModuleList([
+        CMDTop(
+          **cmdtop_params
+        ) for _ in range(3)
+      ])
     else:
-      self.extra_convs = None
+      self.num_pips_iter = 0
+
+    self.occ_linear = nn.Linear(3, 2)
 
   def forward(
       self,
@@ -361,11 +402,7 @@ class LocoTrack(nn.Module):
       raise ValueError('Get query feats not supported in TAPIR.')
 
     if feature_grids is None:
-      feature_grids = self.get_feature_grids(
-          video,
-          is_training,
-          refinement_resolutions,
-      )
+      feature_grids = self.forward_dino(video)
 
     query_features = self.get_query_features(
         video,
@@ -387,15 +424,15 @@ class LocoTrack(nn.Module):
     p = self.num_pips_iter
     out = dict(
         occlusion=torch.mean(
-            torch.stack(trajectories['occlusion'][p::p]), dim=0
+            torch.stack(trajectories['occlusion'][-1:]), dim=0
         ),
-        tracks=torch.mean(torch.stack(trajectories['tracks'][p::p]), dim=0),
+        tracks=torch.mean(torch.stack(trajectories['tracks'][-1:]), dim=0),
         expected_dist=torch.mean(
-            torch.stack(trajectories['expected_dist'][p::p]), dim=0
+            torch.stack(trajectories['expected_dist'][-1:]), dim=0
         ),
-        unrefined_occlusion=trajectories['occlusion'][:-1],
-        unrefined_tracks=trajectories['tracks'][:-1],
-        unrefined_expected_dist=trajectories['expected_dist'][:-1],
+        unrefined_occlusion=trajectories['occlusion'],
+        unrefined_tracks=trajectories['tracks'],
+        unrefined_expected_dist=trajectories['expected_dist'],
     )
 
     return out
@@ -427,13 +464,6 @@ class LocoTrack(nn.Module):
         required resolution.
     """
 
-    if feature_grids is None:
-      feature_grids = self.get_feature_grids(
-          video,
-          is_training=is_training,
-          refinement_resolutions=refinement_resolutions,
-      )
-
     feature_grid = feature_grids.lowres
     hires_feats = feature_grids.hires
     highest_feats = feature_grids.highest
@@ -458,26 +488,8 @@ class LocoTrack(nn.Module):
         hires_query_supp.append(hires_query_supp[-1])
         highest_query_supp.append(highest_query_supp[-1])
         continue
-      position_in_grid = utils.convert_grid_coordinates(
-          query_points,
-          shape[1:4],
-          feature_grid[i].shape[1:4],
-          coordinate_format='tyx',
-      )
-      position_in_grid_hires = utils.convert_grid_coordinates(
-          query_points,
-          shape[1:4],
-          hires_feats[i].shape[1:4],
-          coordinate_format='tyx',
-      )
-      position_in_grid_highest = utils.convert_grid_coordinates(
-          query_points,
-          shape[1:4],
-          highest_feats[i].shape[1:4],
-          coordinate_format='tyx',
-      )
 
-      support_size = 7
+      support_size = self.support_size
       ctxx, ctxy = torch.meshgrid(
         torch.arange(-(support_size // 2), support_size // 2 + 1), 
         torch.arange(-(support_size // 2), support_size // 2 + 1),
@@ -486,156 +498,63 @@ class LocoTrack(nn.Module):
       ctx = torch.stack([torch.zeros_like(ctxy), ctxy, ctxx], axis=-1)
       ctx = torch.reshape(ctx, [-1, 3]).to(video.device) # s*s 3
 
-      position_support = position_in_grid[..., None, :] + ctx[None, None, ...] # b n s*s 3
-      position_support = rearrange(position_support, 'b n s c -> b (n s) c')
-      interp_supp = utils.map_coordinates_3d(
-          feature_grid[i], position_support
-      )
-      interp_supp = rearrange(interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
+      if len(feature_grid) > i:
+        position_in_grid = utils.convert_grid_coordinates(
+            query_points,
+            shape[1:4],
+            feature_grid[i].shape[1:4],
+            coordinate_format='tyx',
+        )
+        position_support = position_in_grid[..., None, :] + ctx[None, None, ...] # b n s*s 3
+        position_support = rearrange(position_support, 'b n s c -> b (n s) c')
+        interp_supp = utils.map_coordinates_3d(
+            feature_grid[i], position_support
+        )
+        interp_supp = rearrange(interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
+        interp_features = interp_supp[..., support_size // 2, support_size // 2, :]
 
-      position_support_hires = position_in_grid_hires[..., None, :] + ctx[None, None, ...]
-      position_support_hires = rearrange(position_support_hires, 'b n s c -> b (n s) c')
-      hires_interp_supp = utils.map_coordinates_3d(
-          hires_feats[i], position_support_hires
-      )
-      hires_interp_supp = rearrange(hires_interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
+        query_feats.append(interp_features)
+        query_supp.append(interp_supp)
 
-      position_support_highest = position_in_grid_highest[..., None, :] + ctx[None, None, ...]
-      position_support_highest = rearrange(position_support_highest, 'b n s c -> b (n s) c')
-      highest_interp_supp = utils.map_coordinates_3d(
-          highest_feats[i], position_support_highest
-      )
-      highest_interp_supp = rearrange(highest_interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
+      if len(hires_feats) > i:
+        position_in_grid_hires = utils.convert_grid_coordinates(
+            query_points,
+            shape[1:4],
+            hires_feats[i].shape[1:4],
+            coordinate_format='tyx',
+        )
+        position_support_hires = position_in_grid_hires[..., None, :] + ctx[None, None, ...]
+        position_support_hires = rearrange(position_support_hires, 'b n s c -> b (n s) c')
+        hires_interp_supp = utils.map_coordinates_3d(
+            hires_feats[i], position_support_hires
+        )
+        hires_interp_supp = rearrange(hires_interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
+        hires_interp = hires_interp_supp[..., support_size // 2, support_size // 2, :]
 
-      interp_features = interp_supp[..., support_size // 2, support_size // 2, :]
-      hires_interp = hires_interp_supp[..., support_size // 2, support_size // 2, :]
-      highest_interp = highest_interp_supp[..., support_size // 2, support_size // 2, :]
+        hires_query_feats.append(hires_interp)
+        hires_query_supp.append(hires_interp_supp)
 
-      hires_query_feats.append(hires_interp)
-      query_feats.append(interp_features)
-      highest_query_feats.append(highest_interp)
-      query_supp.append(interp_supp)
-      hires_query_supp.append(hires_interp_supp)
-      highest_query_supp.append(highest_interp_supp)
+      if len(highest_feats) > i:
+        position_in_grid_highest = utils.convert_grid_coordinates(
+            query_points,
+            shape[1:4],
+            highest_feats[i].shape[1:4],
+            coordinate_format='tyx',
+        )
+        position_support_highest = position_in_grid_highest[..., None, :] + ctx[None, None, ...]
+        position_support_highest = rearrange(position_support_highest, 'b n s c -> b (n s) c')
+        highest_interp_supp = utils.map_coordinates_3d(
+            highest_feats[i], position_support_highest
+        )
+        highest_interp_supp = rearrange(highest_interp_supp, 'b (n h w) c -> b n h w c', h=support_size, w=support_size)
+        highest_interp = highest_interp_supp[..., support_size // 2, support_size // 2, :]
+
+        highest_query_feats.append(highest_interp)
+        highest_query_supp.append(highest_interp_supp)
 
     return QueryFeatures(
         tuple(query_feats), tuple(hires_query_feats), tuple(highest_query_feats), 
         tuple(query_supp), tuple(hires_query_supp), tuple(highest_query_supp), tuple(resize_im_shape),
-    )
-
-  def get_feature_grids(
-      self,
-      video: torch.Tensor,
-      is_training: Optional[bool] = False,
-      refinement_resolutions: Optional[List[Tuple[int, int]]] = None,
-  ) -> FeatureGrids:
-    """Computes feature grids.
-
-    Args:
-      video: A 5-D tensor representing a batch of sequences of images.
-      is_training: Whether we are training.
-      refinement_resolutions: A list of (height, width) tuples. Refinement will
-        be repeated at each specified resolution, to achieve high accuracy on
-        resolutions higher than what TAPIR was trained on. If None, reasonable
-        refinement resolutions will be inferred from the input video size.
-
-    Returns:
-      A FeatureGrids object containing the required features for every
-      required resolution. Note that there will be one more feature grid
-      than there are refinement_resolutions, because there is always a
-      feature grid computed for TAP-Net initialization.
-    """
-    del is_training
-    if refinement_resolutions is None:
-      refinement_resolutions = utils.generate_default_resolutions(
-          video.shape[2:4], self.initial_resolution
-      )
-
-    all_required_resolutions = []
-    all_required_resolutions.extend(refinement_resolutions)
-
-    feature_grid = []
-    hires_feats = []
-    highest_feats = []
-    resize_im_shape = []
-    curr_resolution = (-1, -1)
-
-    latent = None
-    hires = None
-    video_resize = None
-    for resolution in all_required_resolutions:
-      if resolution[0] % 8 != 0 or resolution[1] % 8 != 0:
-        raise ValueError('Image resolution must be a multiple of 8.')
-
-      if not utils.is_same_res(curr_resolution, resolution):
-        if utils.is_same_res(curr_resolution, video.shape[-3:-1]):
-          video_resize = video
-        else:
-          video_resize = utils.bilinear(video, resolution)
-
-        curr_resolution = resolution
-        n, f, h, w, c = video_resize.shape
-        video_resize = video_resize.view(n*f, h, w, c).permute(0, 3, 1, 2)
-
-        if self.feature_extractor_chunk_size > 0:
-          latent_list = []
-          hires_list = []
-          highest_list = []
-          chunk_size = self.feature_extractor_chunk_size
-          for start_idx in range(0, video_resize.shape[0], chunk_size):
-            video_chunk = video_resize[start_idx:start_idx + chunk_size]
-            resnet_out = self.resnet_torch(video_chunk)
-
-            u3 = resnet_out['resnet_unit_3'].permute(0, 2, 3, 1)
-            latent_list.append(u3)
-            u1 = resnet_out['resnet_unit_1'].permute(0, 2, 3, 1)
-            hires_list.append(u1)
-            u0 = resnet_out['resnet_unit_0'].permute(0, 2, 3, 1)
-            highest_list.append(u0)
-
-          latent = torch.cat(latent_list, dim=0)
-          hires = torch.cat(hires_list, dim=0)
-          highest = torch.cat(highest_list, dim=0)
-
-        else:
-          resnet_out = self.resnet_torch(video_resize)
-          latent = resnet_out['resnet_unit_3'].permute(0, 2, 3, 1)
-          hires = resnet_out['resnet_unit_1'].permute(0, 2, 3, 1)
-          highest = resnet_out['resnet_unit_0'].permute(0, 2, 3, 1)
-
-        if self.extra_convs:
-          latent = self.extra_convs(latent)
-
-        latent = latent / torch.sqrt(
-            torch.maximum(
-                torch.sum(torch.square(latent), axis=-1, keepdims=True),
-                torch.tensor(1e-12, device=latent.device),
-            )
-        )
-        hires = hires / torch.sqrt(
-            torch.maximum(
-                torch.sum(torch.square(hires), axis=-1, keepdims=True),
-                torch.tensor(1e-12, device=hires.device),
-            )
-        )
-        highest = highest / torch.sqrt(
-            torch.maximum(
-                torch.sum(torch.square(highest), axis=-1, keepdims=True),
-                torch.tensor(1e-12, device=highest.device),
-            )
-        )
-
-        latent = latent.view(n, f, *latent.shape[1:])
-        hires = hires.view(n, f, *hires.shape[1:])
-        highest = highest.view(n, f, *highest.shape[1:])
-
-      feature_grid.append(latent)
-      hires_feats.append(hires)
-      highest_feats.append(highest)
-      resize_im_shape.append(video_resize.shape[2:4])
-
-    return FeatureGrids(
-        tuple(feature_grid), tuple(hires_feats), tuple(highest_feats), tuple(resize_im_shape)
     )
 
   def estimate_trajectories(
@@ -710,7 +629,6 @@ class LocoTrack(nn.Module):
 
     for ch in range(0, num_queries, query_chunk_size):
       chunk = query_features.lowres[0][:, ch:ch + query_chunk_size]
-      chunk_hires = query_features.hires[0][:, ch:ch + query_chunk_size]
 
       if query_points_in_video is not None:
         infer_query_points = query_points_in_video[
@@ -728,9 +646,7 @@ class LocoTrack(nn.Module):
 
       points, occlusion, expected_dist, cost_volume = infer(
           chunk,
-          chunk_hires,
           feature_grids.lowres[0],
-          feature_grids.hires[0],
           infer_query_points,
       )
       pts_iters[0].append(train2orig(points))
@@ -740,32 +656,23 @@ class LocoTrack(nn.Module):
       mixer_feats = None
       for i in range(num_iters):
         feature_level = -1
-        queries = [
-            query_features.hires[feature_level][:, ch:ch + query_chunk_size],
-            query_features.lowres[feature_level][:, ch:ch + query_chunk_size],
-            query_features.highest[feature_level][:, ch:ch + query_chunk_size],
-        ]
-        supports = [
-            query_features.hires_supp[feature_level][:, ch:ch + query_chunk_size],
-            query_features.lowres_supp[feature_level][:, ch:ch + query_chunk_size],
-            query_features.highest_supp[feature_level][:, ch:ch + query_chunk_size],
-        ]
-        for _ in range(self.pyramid_level):
-          queries.append(queries[-1])
+        queries = []
+        supports = []
+        if len(query_features.hires) > 0:
+          queries.append(query_features.hires[feature_level][:, ch:ch + query_chunk_size])
+          supports.append(query_features.hires_supp[feature_level][:, ch:ch + query_chunk_size])
+        if len(query_features.lowres) > 0:
+          queries.append(query_features.lowres[feature_level][:, ch:ch + query_chunk_size])
+          supports.append(query_features.lowres_supp[feature_level][:, ch:ch + query_chunk_size])
+        if len(query_features.highest) > 0:
+          queries.append(query_features.highest[feature_level][:, ch:ch + query_chunk_size])
+          supports.append(query_features.highest_supp[feature_level][:, ch:ch + query_chunk_size])
+
         pyramid = [
             feature_grids.hires[feature_level],
             feature_grids.lowres[feature_level],
             feature_grids.highest[feature_level],
         ]
-        for _ in range(self.pyramid_level):
-          pyramid.append(
-              F.avg_pool3d(
-                  pyramid[-1],
-                  kernel_size=(2, 2, 1),
-                  stride=(2, 2, 1),
-                  padding=0,
-              )
-          )
 
         refined = self.refine_pips(
             queries,
@@ -838,7 +745,7 @@ class LocoTrack(nn.Module):
       )
       coords = torch.flip(coords, dims=(-1,))
 
-      support_size = 7
+      support_size = self.window_size
       ctxx, ctxy = torch.meshgrid(
         torch.arange(-(support_size // 2), support_size // 2 + 1), 
         torch.arange(-(support_size // 2), support_size // 2 + 1),
@@ -906,12 +813,11 @@ class LocoTrack(nn.Module):
         None,
     )
 
+  
   def tracks_from_cost_volume(
       self,
       interp_feature: torch.Tensor,
-      interp_feature_hires: torch.Tensor,
       feature_grid: torch.Tensor,
-      feature_grid_hires: torch.Tensor,
       query_points: Optional[torch.Tensor],
       im_shp=None,
   ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -945,28 +851,11 @@ class LocoTrack(nn.Module):
         interp_feature,
         feature_grid,
     )
-    cost_volume_hires = torch.einsum(
-        'bnc,bthwc->tbnhw',
-        interp_feature_hires,
-        feature_grid_hires,
-    )
 
     shape = cost_volume.shape
     batch_size, num_points = cost_volume.shape[1:3]
 
-    interp_cost = rearrange(cost_volume, 't b n h w -> (t b n) () h w')
-    interp_cost = F.interpolate(interp_cost, cost_volume_hires.shape[3:], mode='bilinear', align_corners=False)
-    interp_cost = rearrange(interp_cost, '(t b n) () h w -> t b n h w', b=batch_size, n=num_points)
-    cost_volume_stack = torch.stack(
-        [
-          interp_cost,
-          cost_volume_hires,
-        ], dim=-1
-    )
-    pos = rearrange(cost_volume_stack, 't b n h w c -> (t b n) c h w')
-    pos = self.cost_conv(pos)
-    pos = rearrange(pos, '(t b n) () h w -> b n t h w', b=batch_size, n=num_points)
-    
+    pos = rearrange(cost_volume, 't b n h w -> b n t h w')
     pos_sm = pos.reshape(pos.size(0), pos.size(1), pos.size(2), -1)
     softmaxed = F.softmax(pos_sm * self.softmax_temperature, dim=-1)
     pos = softmaxed.view_as(pos)
@@ -975,12 +864,12 @@ class LocoTrack(nn.Module):
 
     occlusion = torch.cat(
       [
-        torch.mean(cost_volume_stack, dim=(-2, -3)),
-        torch.amax(cost_volume_stack, dim=(-2, -3)),
-        torch.amin(cost_volume_stack, dim=(-2, -3)),
+        torch.mean(cost_volume, dim=(-1, -2))[..., None],
+        torch.amax(cost_volume, dim=(-1, -2))[..., None],
+        torch.amin(cost_volume, dim=(-1, -2))[..., None],
       ], dim=-1
     )
-    occlusion = self.occ_linear(occlusion)
+    occlusion = self.occ_linear(occlusion.detach())
     expected_dist = rearrange(occlusion[..., 1:2], 't b n () -> b n t', t=shape[0])
     occlusion = rearrange(occlusion[..., 0:1], 't b n () -> b n t', t=shape[0])
 
@@ -996,6 +885,64 @@ class LocoTrack(nn.Module):
         k: torch.zeros(v, dtype=torch.float32) for k, v in value_shapes.items()
     }
     return [fake_ret] * num_resolutions * 4
+
+  def forward_dino(
+    self,
+    video: torch.Tensor,
+    use_bfloat16: bool = True,
+    img_mult: int = 64,
+  ):
+    """
+    Args:
+      video: torch.Tensor, shape [batch, time, height, width, 3], normalized to [-1, 1]
+    """
+    IMAGENET_DEFAULT_MEAN = torch.tensor((0.485, 0.456, 0.406), device=video.device)
+    IMAGENET_DEFAULT_STD = torch.tensor((0.229, 0.224, 0.225), device=video.device)
+
+    B, T = video.shape[:2]
+    video = (video + 1) / 2
+    video = (video - IMAGENET_DEFAULT_MEAN) / IMAGENET_DEFAULT_STD
+    video = rearrange(video, 'b t h w c -> (b t) c h w')
+
+    img_mult = self.img_mult
+    vid_size = (14 * img_mult, 14 * img_mult)
+    H_f, W_f = img_mult, img_mult
+
+    # add forward hooks for dino
+    hooks = []
+    for block_idx, block in enumerate(self.dino.blocks[:-1]):
+      def hook_fn(module, input, output):
+        cls_token = output[:, :1] # B, 4097, 768
+        input_feat = rearrange(output[:, 1:], '(b t) (h w) c -> b c t h w', b=B, h=H_f, w=W_f)
+        input_feat = self.dino_adapter[0](input_feat)
+        input_feat = rearrange(input_feat, 'b c t h w -> (b t) (h w) c')
+        return output + torch.cat([torch.zeros_like(cls_token), input_feat], dim=1) # Residual connection
+
+      hook = block.register_forward_hook(hook_fn)
+      hooks.append(hook)
+
+    video_resized = F.interpolate(video, size=vid_size, mode='bilinear', align_corners=False)
+    with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=use_bfloat16): # Use bfloat16 for DINO
+      video_feat = self.dino.get_intermediate_layers(video_resized, n=1, return_class_token=False)
+    video_feat = rearrange(video_feat[-1], '(b t) (h w) c -> b t h w c', b=B, h=H_f, w=W_f)
+
+    for hook in hooks:
+      hook.remove()
+
+    video_feat = video_feat / torch.sqrt(
+      torch.maximum(
+          torch.sum(torch.square(video_feat), axis=-1, keepdims=True),
+          torch.tensor(1e-6, device=video_feat.device),
+      )
+    )
+    
+    return FeatureGrids(
+      tuple([video_feat,]), 
+      tuple([]),
+      tuple([]),
+      ((256, 256),)
+    )
+
   
   def inference(
       self, 

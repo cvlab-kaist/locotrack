@@ -53,6 +53,20 @@ class LocoTrackModel(L.LightningModule):
             sync_dist=True,
         )
 
+        opt = self.optimizers()
+        sched = self.lr_schedulers()
+        opt.zero_grad()
+        self.manual_backward(loss)
+
+        if any([p.grad.isnan().any() for p in self.parameters() if p.grad is not None]):
+            print('nan gradients detected, skipping step')
+            [p.grad.zero_() for p in self.parameters() if p.grad is not None and p.grad.isnan().any()]
+
+        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+
+        opt.step()
+        sched.step()
+
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx=None):
@@ -98,13 +112,17 @@ class LocoTrackModel(L.LightningModule):
         logging.info(f"Batch {batch_idx}: {metrics}")
         
     def configure_optimizers(self):
-        weights = [p for n, p in self.named_parameters() if 'bias' not in n]
-        bias = [p for n, p in self.named_parameters() if 'bias' in n]
+        trainable_params = []
+
+        for k, v in self.named_parameters():
+            if 'dino' not in k or 'lora' in k:
+                trainable_params.append(v)
+            else:
+                v.requires_grad = False
 
         optimizer = torch.optim.__dict__[self.optimizer_name](
             [
-                {'params': weights, **self.optimizer_kwargs},
-                {'params': bias, **self.optimizer_kwargs, 'weight_decay': 0.}
+                {'params': trainable_params, **self.optimizer_kwargs},
             ]
         )
         scheduler = torch.optim.lr_scheduler.__dict__[self.scheduler_name](optimizer, **self.scheduler_kwargs)
@@ -182,7 +200,6 @@ def train(
             precision=precision,
             val_check_interval=val_check_interval,
             log_every_n_steps=log_every_n_steps,
-            gradient_clip_val=gradient_clip_val,
             max_steps=max_steps,
             sync_batchnorm=True,
             callbacks=[checkpoint_callback, lr_monitor],
