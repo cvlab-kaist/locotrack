@@ -3,16 +3,18 @@ import configparser
 import argparse
 import logging
 from functools import partial
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, Tuple
 
 import lightning as L
 from lightning.pytorch import seed_everything
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor, TQDMProgressBar
+from lightning.pytorch.utilities.combined_loader import CombinedLoader
 import torch
 from torch.utils.data import DataLoader
 
 from data.kubric_data import KubricData
+from data.real_data import RealVideoDataset
 from models.locotrack_model import LocoTrack
 import model_utils
 from data.evaluation_datasets import get_eval_dataset
@@ -150,6 +152,11 @@ def train(
     optimizer_kwargs: Optional[Dict[str, Any]] = None,
     scheduler_name: str = 'OneCycleLR',
     scheduler_kwargs: Optional[Dict[str, Any]] = None,
+    real_data_dir: str = '',
+    real_video_size: Optional[Tuple[int, int]] = (512, 512),
+    real_video_length: int = 24,
+    real_points_to_sample: int = 512,
+    real_batch_size: int = 1,
     # query_first: bool = False,
 ):
     """Train the LocoTrack model with specified configurations."""
@@ -204,13 +211,29 @@ def train(
             sync_batchnorm=True,
             callbacks=[checkpoint_callback, lr_monitor],
         )
-        train_dataloader = KubricData(
+        synthetic_dataloader = KubricData(
             global_rank=trainer.global_rank, 
             world_size=trainer.world_size,
             data_dir=kubric_dir, 
             batch_size=batch_size * trainer.world_size,
         )
-        trainer.fit(model, train_dataloader, eval_dataloder, ckpt_path=ckpt_path)
+        real_dataset = RealVideoDataset(
+            data_dir=real_data_dir,
+            video_size=real_video_size,
+            video_length=real_video_length,
+            points_to_sample=real_points_to_sample,
+        )
+        real_dataloader = DataLoader(
+            real_dataset, 
+            batch_size=real_batch_size,
+            shuffle=True,
+            num_workers=16,
+        )
+        dataloader = CombinedLoader({
+            'synthetic': synthetic_dataloader,
+            'real': real_dataloader,
+        }, 'max_size_cycle')
+        trainer.fit(model, dataloader, eval_dataloder, ckpt_path=ckpt_path)
     elif 'eval' in mode:
         trainer = L.Trainer(strategy='ddp', logger=logger, precision=precision)
         trainer.test(model, eval_dataloder, ckpt_path=ckpt_path)
@@ -249,6 +272,11 @@ if __name__ == '__main__':
         'optimizer_kwargs': eval(config.get('OPTIMIZER', 'optimizer_kwargs', fallback='{"lr": 2e-3}')),
         'scheduler_name': config.get('SCHEDULER', 'scheduler_name', fallback='OneCycleLR'),
         'scheduler_kwargs': eval(config.get('SCHEDULER', 'scheduler_kwargs', fallback='{"max_lr": 2e-3, "pct_start": 0.05, "total_steps": 300000}')),
+        'real_data_dir': config.get('REALDATA', 'data_dir', fallback=''),
+        'real_video_size': eval(config.get('REALDATA', 'video_size', fallback='(512, 512)')),
+        'real_video_length': config.getint('REALDATA', 'video_length', fallback=24),
+        'real_points_to_sample': config.getint('REALDATA', 'points_to_sample', fallback=512),
+        'real_batch_size': config.getint('REALDATA', 'batch_size', fallback=1),
     }
 
     train(**train_params)

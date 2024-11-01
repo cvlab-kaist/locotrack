@@ -330,7 +330,8 @@ class LocoTrack(nn.Module):
     input_channels = {
         "small": 384,
         "base": 768,
-        "large": 1536,
+        "large": 1024,
+        "giant": 1280,
     }
 
     backbone_arch = backbone_archs[dino_size]
