@@ -32,6 +32,7 @@ from PIL import Image
 import scipy.io as sio
 import tensorflow as tf
 import tensorflow_datasets as tfds
+from torch.utils.data import Dataset
 
 from models.utils import convert_grid_coordinates
 
@@ -561,6 +562,167 @@ def create_rgb_stacking_dataset(
 
     yield {'robotics': converted}
 
+class RoboticsStackingDataset(Dataset):
+    def __init__(
+        self,
+        robotics_points_path: str,
+        query_mode: str = 'strided',
+        resolution: Optional[Tuple[int, int]] = (256, 256),
+    ):
+        """
+        :param robotics_points_path: Path to the pickle file.
+        :param query_mode: 'strided' or 'first'.
+        :param resolution: (height, width) tuple for resizing, or None to skip resizing.
+        """
+        super().__init__()
+        # Load entire dataset once in constructor. If the file is huge,
+        # consider using a more suitable data format or chunked approach.
+        with open(robotics_points_path, 'rb') as f:
+            self.robotics_points_dataset = pickle.load(f)
+        
+        self.query_mode = query_mode
+        self.resolution = resolution
+
+    def __len__(self):
+        return len(self.robotics_points_dataset)
+
+    def __getitem__(self, idx):
+        example = self.robotics_points_dataset[idx]
+        frames = example['video']
+
+        # Optionally resize
+        if self.resolution is not None and self.resolution != frames.shape[1:3]:
+            frames = resize_video(frames, self.resolution)
+
+        # Normalize frames to [-1, 1]
+        frames = frames.astype(np.float32) / 255.0 * 2.0 - 1.0
+        
+        # Scale target points according to image width/height
+        target_points = example['points']
+        target_occ = example['occluded']
+        height, width = frames.shape[1], frames.shape[2]
+        target_points = target_points * np.array([width, height])
+
+        # Sample queries
+        if self.query_mode == 'strided':
+            converted = sample_queries_strided(target_occ, target_points, frames)
+        elif self.query_mode == 'first':
+            converted = sample_queries_first(target_occ, target_points, frames)
+        else:
+            raise ValueError(f'Unknown query mode: {self.query_mode}.')
+
+        # Convert numpy arrays to torch Tensors.
+        # If you don't need the `[0]` index, you can remove that part;
+        # it depends on how your sample_queries_* functions structure their output.
+        data = {}
+        for k, v in converted.items():
+            if isinstance(v, np.ndarray):
+                # If v has shape (1, ...) or you only need the first element, keep [0].
+                # Otherwise, you might just do `torch.tensor(v)`.
+                tensor_v = torch.tensor(v)[0]  
+                # Convert double to float if necessary
+                if tensor_v.dtype == torch.float64:
+                    tensor_v = tensor_v.float()
+                data[k] = tensor_v
+            else:
+                data[k] = v
+
+        return data
+
+
+class KineticsDataset(Dataset):
+    """
+    A PyTorch dataset for Kinetics point tracking.
+
+    This loads all pickle files that match '*_of_0010.pkl' under kinetics_path
+    and accumulates them in memory. If your dataset is huge, consider a more
+    incremental approach.
+    """
+    def __init__(
+        self,
+        kinetics_path: str,
+        query_mode: str = 'strided',
+        resolution: Optional[Tuple[int, int]] = (256, 256),
+    ):
+        """
+        :param kinetics_path: Directory path where '*_of_0010.pkl' files reside.
+        :param query_mode: Either 'strided' or 'first'.
+        :param resolution: (height, width) for resizing, or None to skip resizing.
+        """
+        super().__init__()
+        self.query_mode = query_mode
+        self.resolution = resolution
+
+        # Collect all pickle files matching '*_of_0010.pkl'
+        # If you're not using tf.io.gfile, you can simply do:
+        # from glob import glob
+        # all_paths = glob(path.join(kinetics_path, '*_of_0010.pkl'))
+        from glob import glob
+        self.all_paths = sorted(glob(path.join(kinetics_path, '*_of_0010.pkl')))
+
+        # Read all data into memory
+        self.samples = []
+        for pickle_path in self.all_paths:
+            with open(pickle_path, 'rb') as f:
+                data = pickle.load(f)
+                if isinstance(data, dict):
+                    data = list(data.values())
+            # Accumulate each sample in self.samples
+            self.samples.extend(data)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        example = self.samples[idx]
+
+        frames = example['video']
+
+        # If frames are JPEG bytes rather than arrays, decode them
+        if isinstance(frames[0], bytes):
+            frames = np.array([self._decode_jpeg(f) for f in frames])
+
+        # Optionally resize
+        if self.resolution is not None and self.resolution != frames.shape[1:3]:
+            frames = resize_video(frames, self.resolution)
+
+        # Normalize frames to [-1, 1]
+        frames = frames.astype(np.float32) / 255.0 * 2.0 - 1.0
+
+        # Scale target points (x,y) by width and height
+        target_points = example['points']
+        target_occ = example['occluded']
+        height, width = frames.shape[1], frames.shape[2]
+        target_points = target_points * np.array([width, height])
+
+        # Perform query sampling
+        if self.query_mode == 'strided':
+            converted = sample_queries_strided(target_occ, target_points, frames)
+        elif self.query_mode == 'first':
+            converted = sample_queries_first(target_occ, target_points, frames)
+        else:
+            raise ValueError(f'Unknown query mode: {self.query_mode}.')
+
+        # Convert everything into PyTorch tensors
+        out_dict = {}
+        for k, v in converted.items():
+            if isinstance(v, np.ndarray):
+                # If needed, remove or adjust [0] depending on your usage:
+                tensor_v = torch.tensor(v)[0]
+                if tensor_v.dtype == torch.float64:
+                    tensor_v = tensor_v.float()
+                out_dict[k] = tensor_v
+            else:
+                out_dict[k] = v
+
+        return out_dict
+
+    def _decode_jpeg(self, frame_bytes: bytes) -> np.ndarray:
+        """Helper to decode a JPEG byte string into a NumPy array."""
+        byteio = io.BytesIO(frame_bytes)
+        img = Image.open(byteio)
+        return np.array(img)
+
 
 def create_kinetics_dataset(
     kinetics_path: str, query_mode: str = 'strided',
@@ -752,12 +914,14 @@ def get_eval_dataset(mode, path, resolution=(256, 256)):
         datasets[key] = CustomDataset(dataset, key)
     if 'robotics' in mode:
         key = 'robotics'
-        dataset = create_rgb_stacking_dataset(path[key], query_mode, resolution)
-        datasets[key] = CustomDataset(dataset, key)
+        datasets[key] = RoboticsStackingDataset(
+            path[key], query_mode, resolution
+        )
     if 'kinetics' in mode:
         key = 'kinetics'
-        dataset = create_kinetics_dataset(path[key], query_mode, resolution)
-        datasets[key] = CustomDataset(dataset, key)
+        datasets[key] = KineticsDataset(
+            path[key], query_mode, resolution
+        )
     if 'robotap' in mode:
         key = 'robotap'
         dataset = create_robotap_dataset(path[key], query_mode, resolution)
