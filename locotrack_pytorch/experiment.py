@@ -42,6 +42,8 @@ class LocoTrackModel(L.LightningModule):
         self.scheduler_name = scheduler_name
         self.scheduler_kwargs = scheduler_kwargs or {'max_lr': 2e-3, 'pct_start': 0.05, 'total_steps': 300000}
 
+        self.automatic_optimization=False
+
     def training_step(self, batch, batch_idx):
         output = self.model(batch['video'], batch['query_points'], **self.model_forward_kwargs)
         loss, loss_scalars = self.loss(batch, output)
@@ -52,6 +54,20 @@ class LocoTrackModel(L.LightningModule):
             on_step=True,
             sync_dist=True,
         )
+
+        opt = self.optimizers()
+        sched = self.lr_schedulers()
+        opt.zero_grad()
+        self.manual_backward(loss)
+
+        if any([p.grad.isnan().any() for p in self.parameters() if p.grad is not None]):
+            print('nan gradients detected, skipping step')
+            [p.grad.zero_() for p in self.parameters() if p.grad is not None and p.grad.isnan().any()]
+
+        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+
+        opt.step()
+        sched.step()
 
         return loss
 
@@ -182,7 +198,6 @@ def train(
             precision=precision,
             val_check_interval=val_check_interval,
             log_every_n_steps=log_every_n_steps,
-            gradient_clip_val=gradient_clip_val,
             max_steps=max_steps,
             sync_batchnorm=True,
             callbacks=[checkpoint_callback, lr_monitor],
